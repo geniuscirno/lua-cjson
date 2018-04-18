@@ -1629,6 +1629,8 @@ static int lua_cjson_new(lua_State *l)
     luaL_newmetatable(l, "numberlong_meta");
     lua_pushvalue(l, -1);
     lua_setfield(l, -2, "__index");
+    lua_pushstring(l, "number_long");
+    lua_setfield(l, -2, "__type");
     compat_luaL_setfuncs(l, numberlonglib_m, 0);    
 
     /* cjson module table */

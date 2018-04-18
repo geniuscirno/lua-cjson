@@ -17,6 +17,9 @@ print (a=="10")
 print (a==10)
 print (b=="11")
 
+local t = getmetatable(a)
+print (t.__type)
+
 -- print (json.number_long(-1))
 
 -- local data2 =  "[0.0,-5e3,-1,0.3e-3,1023.2,0e10]"
