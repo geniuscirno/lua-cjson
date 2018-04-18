@@ -40,6 +40,8 @@
 #include <string.h>
 #include <math.h>
 #include <limits.h>
+#include <stdint.h>
+#include <inttypes.h>
 #include <lua.h>
 #include <lauxlib.h>
 
@@ -163,13 +165,19 @@ typedef struct {
 typedef struct {
     json_token_type_t type;
     int index;
+    int use_number_long;
     union {
         const char *string;
         double number;
+        int64_t int64_number;
         int boolean;
     } value;
     int string_len;
 } json_token_t;
+
+typedef struct{
+    int64_t number;
+} number_long_t;
 
 static const char *char2escape[256] = {
     "\\u0000", "\\u0001", "\\u0002", "\\u0003",
@@ -773,6 +781,14 @@ static void json_append_data(lua_State *l, json_config_t *cfg,
             json_append_array(l, cfg, current_depth, json, 0);
         }
         break;
+    case LUA_TUSERDATA:
+        if (lua_type(l, -1) == LUA_TUSERDATA) {
+            char buf[21];
+            number_long_t *value = (number_long_t *)lua_touserdata(l, -1);
+            snprintf(buf, sizeof(buf), "%" PRId64, value->number);
+            strbuf_append_mem(json, buf, strlen(buf));
+            break;
+        }
     default:
         /* Remaining types (LUA_TFUNCTION, LUA_TUSERDATA, LUA_TTHREAD,
          * and LUA_TLIGHTUSERDATA) cannot be serialised */
@@ -1074,12 +1090,32 @@ static int json_is_invalid_number(json_parse_t *json)
     return 0;
 }
 
+int is_number_long(const char *p) {
+    while (1) {
+        if (*p ==',' || *p ==']' || *p == '}'){
+            return 1;
+        }
+        if (*p != '-' && *p != '+' && !('0' <= *p && *p <= '9')){
+            return 0;
+        }
+        p++;
+    }
+    return 0;
+}
+
 static void json_next_number_token(json_parse_t *json, json_token_t *token)
 {
     char *endptr;
+    char *endbuf;
 
     token->type = T_NUMBER;
-    token->value.number = fpconv_strtod(json->ptr, &endptr);
+    if (!is_number_long(json->ptr)) {
+        token->value.number = fpconv_strtod(json->ptr, &endptr);
+    }else{
+        token->value.int64_number = strtoll(json->ptr, &endbuf, 10);
+        endptr = (char *)&(json->ptr[endbuf - json->ptr]);
+        token->use_number_long = 1;
+    }
     if (json->ptr == endptr)
         json_set_token_error(token, json, "invalid number");
     else
@@ -1217,6 +1253,7 @@ static void json_parse_object_context(lua_State *l, json_parse_t *json)
 {
     json_token_t token;
 
+
     /* 3 slots required:
      * .., table, key, value */
     json_decode_descend(l, json, 3);
@@ -1243,6 +1280,7 @@ static void json_parse_object_context(lua_State *l, json_parse_t *json)
             json_throw_parse_error(l, json, "colon", &token);
 
         /* Fetch value */
+        token.use_number_long = 0;
         json_next_token(json, &token);
         json_process_value(l, json, &token);
 
@@ -1269,6 +1307,7 @@ static void json_parse_array_context(lua_State *l, json_parse_t *json)
     json_token_t token;
     int i;
 
+
     /* 2 slots required:
      * .., table, value */
     json_decode_descend(l, json, 2);
@@ -1282,6 +1321,7 @@ static void json_parse_array_context(lua_State *l, json_parse_t *json)
         lua_setmetatable(l, -2);
     }
 
+    token.use_number_long = 0;
     json_next_token(json, &token);
 
     /* Handle empty arrays */
@@ -1304,9 +1344,11 @@ static void json_parse_array_context(lua_State *l, json_parse_t *json)
         if (token.type != T_COMMA)
             json_throw_parse_error(l, json, "comma or array end", &token);
 
+        token.use_number_long = 0;
         json_next_token(json, &token);
     }
 }
+
 
 /* Handle the "value" context */
 static void json_process_value(lua_State *l, json_parse_t *json,
@@ -1317,7 +1359,14 @@ static void json_process_value(lua_State *l, json_parse_t *json,
         lua_pushlstring(l, token->value.string, token->string_len);
         break;;
     case T_NUMBER:
-        lua_pushnumber(l, token->value.number);
+        if (token->use_number_long != 0) {
+            number_long_t *value = (number_long_t *)lua_newuserdata(l, sizeof(number_long_t));
+            luaL_getmetatable(l, "numberlong_meta");
+            lua_setmetatable(l, -2);
+            value->number = token->value.int64_number;
+        }else{
+            lua_pushnumber(l, token->value.number);
+        }
         break;;
     case T_BOOLEAN:
         lua_pushboolean(l, token->value.boolean);
@@ -1350,6 +1399,8 @@ static int json_decode(lua_State *l)
     json.data = luaL_checklstring(l, 1, &json_len);
     json.current_depth = 0;
     json.ptr = json.data;
+
+    token.use_number_long = 0;
 
     /* Detect Unicode other than UTF-8 (see RFC 4627, Sec 3)
      *
@@ -1432,6 +1483,86 @@ static int json_protect_conversion(lua_State *l)
     return luaL_error(l, "Memory allocation error in CJSON protected call");
 }
 
+static int lua_number_long(lua_State *l) {
+    number_long_t *value;
+    int64_t v;
+
+    luaL_argcheck(l, lua_gettop(l) == 1, 1, "expected 1 argument");
+
+    v = luaL_checklong(l, 1);
+
+    value = (number_long_t *)lua_newuserdata(l, sizeof(number_long_t));
+    value->number = v;
+    luaL_getmetatable(l, "numberlong_meta");
+    lua_setmetatable(l, -2);
+
+    return 1;
+}
+
+int lua_number_long_tostring(lua_State *l) {
+    char buf[21];
+    snprintf(buf, sizeof(buf), "%" PRId64, ((number_long_t *)lua_touserdata(l, 1))->number);
+    lua_pushstring(l, buf);
+    return 1;
+}
+
+int lua_number_long_add(lua_State *l) {
+    number_long_t *x = (number_long_t *)lua_touserdata(l, 1);
+    number_long_t *y = (number_long_t *)lua_touserdata(l, 2);
+
+    number_long_t *z = (number_long_t *)lua_newuserdata(l, sizeof(number_long_t));
+    z->number = x->number + y->number;
+    luaL_getmetatable(l, "numberlong_meta");
+    lua_setmetatable(l, -2);
+    return 1;
+}
+
+int lua_number_long_sub(lua_State *l) {
+    number_long_t *x = (number_long_t *)lua_touserdata(l, 1);
+    number_long_t *y = (number_long_t *)lua_touserdata(l, 2);
+
+    number_long_t *z = (number_long_t *)lua_newuserdata(l, sizeof(number_long_t));
+    z->number = x->number - y->number;
+    luaL_getmetatable(l, "numberlong_meta");
+    lua_setmetatable(l, -2);
+    return 1;
+}
+
+int lua_number_long_equal(lua_State *l) {
+    number_long_t *x = (number_long_t *)lua_touserdata(l, 1);
+    number_long_t *y = (number_long_t *)lua_touserdata(l, 2);
+    lua_pushboolean(l, x->number == y->number);
+    return 1;
+}
+
+int lua_number_long_great_than(lua_State *l) {
+    number_long_t *x = (number_long_t *)lua_touserdata(l, 1);
+    number_long_t *y = (number_long_t *)lua_touserdata(l, 2);
+    lua_pushboolean(l, x->number > y->number);
+    return 1;
+}
+
+int lua_number_long_great_than_or_equal(lua_State *l) {
+    number_long_t *x = (number_long_t *)lua_touserdata(l, 1);
+    number_long_t *y = (number_long_t *)lua_touserdata(l, 2);
+    lua_pushboolean(l, x->number >= y->number);
+    return 1;
+}
+
+int lua_number_long_less_than(lua_State *l) {
+    number_long_t *x = (number_long_t *)lua_touserdata(l, 1);
+    number_long_t *y = (number_long_t *)lua_touserdata(l, 2);
+    lua_pushboolean(l, x->number < y->number);
+    return 1;
+}
+
+int lua_number_long_less_than_or_equal(lua_State *l) {
+    number_long_t *x = (number_long_t *)lua_touserdata(l, 1);
+    number_long_t *y = (number_long_t *)lua_touserdata(l, 2);
+    lua_pushboolean(l, x->number <= y->number);
+    return 1;
+}
+
 /* Return cjson module table */
 static int lua_cjson_new(lua_State *l)
 {
@@ -1448,8 +1579,22 @@ static int lua_cjson_new(lua_State *l)
         { "encode_invalid_numbers", json_cfg_encode_invalid_numbers },
         { "decode_invalid_numbers", json_cfg_decode_invalid_numbers },
         { "new", lua_cjson_new },
+        { "number_long", lua_number_long},
         { NULL, NULL }
     };
+
+    luaL_Reg numberlonglib_m[] = {
+        {"__tostring", lua_number_long_tostring},
+        {"__add", lua_number_long_add},
+        {"__sub", lua_number_long_sub},
+        {"__eq", lua_number_long_equal},
+        {"__gt", lua_number_long_great_than},
+        {"__gte", lua_number_long_great_than_or_equal},
+        {"__lt", lua_number_long_less_than},
+        {"__lte", lua_number_long_less_than_or_equal},
+        {NULL, NULL}
+    };
+
 
     /* Initialise number conversions */
     fpconv_init();
@@ -1476,6 +1621,11 @@ static int lua_cjson_new(lua_State *l)
         lua_newtable(l);
         lua_rawset(l, LUA_REGISTRYINDEX);
     }
+
+    luaL_newmetatable(l, "numberlong_meta");
+    lua_pushvalue(l, -1);
+    lua_setfield(l, -2, "__index");
+    compat_luaL_setfuncs(l, numberlonglib_m, 0);    
 
     /* cjson module table */
     lua_newtable(l);
@@ -1507,6 +1657,9 @@ static int lua_cjson_new(lua_State *l)
     lua_setfield(l, -2, "_NAME");
     lua_pushliteral(l, CJSON_VERSION);
     lua_setfield(l, -2, "_VERSION");
+
+
+    //luaopen_numberlong(l);
 
     return 1;
 }

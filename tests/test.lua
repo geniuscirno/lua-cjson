@@ -100,7 +100,7 @@ local cjson_tests = {
       json.decode, { '"test string"' }, true, { "test string" } },
     { "Decode numbers",
       json.decode, { '[ 0.0, -5e3, -1, 0.3e-3, 1023.2, 0e10 ]' },
-      true, { { 0.0, -5000, -1, 0.0003, 1023.2, 0 } } },
+      true, { { 0.0, -5000, json.number_long(-1), 0.0003, 1023.2, 0 } } },
     { "Decode null",
       json.decode, { 'null' }, true, { json.null } },
     { "Decode true",
@@ -222,7 +222,7 @@ local cjson_tests = {
     { "Decode hexadecimal",
       json.decode, { '0x6.ffp1' }, true, { 13.9921875 } },
     { "Decode numbers with leading zero",
-      json.decode, { '[ 0123, 00.33 ]' }, true, { { 123, 0.33 } } },
+      json.decode, { '[ 0123, 00.33 ]' }, true, { { json.number_long(123), 0.33 } } },
     { "Decode +-Inf",
       json.decode, { '[ +Inf, Inf, -Inf ]' }, true, { { Inf, Inf, -Inf } } },
     { "Decode +-Infinity",
@@ -339,7 +339,7 @@ local cjson_tests = {
     { "Encode number under comma locale",
       json.encode, { 1.5 }, true, { '1.5' } },
     { "Decode number in array under comma locale",
-      json.decode, { '[ 10, "test" ]' }, true, { { 10, "test" } } },
+      json.decode, { '[ 10, "test" ]' }, true, { { json.number_long(10), "test" } } },
     { "Revert locale to POSIX", function ()
         os.setlocale("C")
         json.new()
