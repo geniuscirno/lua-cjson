@@ -1499,69 +1499,70 @@ static int lua_number_long(lua_State *l) {
     return 1;
 }
 
+number_long_t* check_number_long_t(lua_State *l, int lindex) {
+    void *ud = luaL_checkudata(l, lindex, "numberlong_meta");
+    luaL_argcheck(l, ud != NULL , lindex, "'number_long' expect");
+    return (number_long_t *)ud;
+}
+
 int lua_number_long_tostring(lua_State *l) {
     char buf[21];
-    snprintf(buf, sizeof(buf), "%" PRId64, ((number_long_t *)lua_touserdata(l, 1))->number);
+    snprintf(buf, sizeof(buf), "%" PRId64, check_number_long_t(l, 1)->number);
     lua_pushstring(l, buf);
     return 1;
 }
 
-int lua_number_long_add(lua_State *l) {
-    number_long_t *x = (number_long_t *)lua_touserdata(l, 1);
-    number_long_t *y = (number_long_t *)lua_touserdata(l, 2);
-
-    number_long_t *z = (number_long_t *)lua_newuserdata(l, sizeof(number_long_t));
-    z->number = x->number + y->number;
-    luaL_getmetatable(l, "numberlong_meta");
-    lua_setmetatable(l, -2);
+int lua_number_long_tonumber(lua_State *l) {
+    lua_pushnumber(l, check_number_long_t(l, 1)->number);
     return 1;
 }
 
-int lua_number_long_sub(lua_State *l) {
-    number_long_t *x = (number_long_t *)lua_touserdata(l, 1);
-    number_long_t *y = (number_long_t *)lua_touserdata(l, 2);
+#define make_number_long_numerical_operator_func(name, op)    \
+    int lua_number_long_##name(lua_State *l) {\
+        number_long_t *x = check_number_long_t(l, 1);\
+        number_long_t *y;\
+        number_long_t *z;\
+        switch (lua_type(l, 2)) {\
+        case LUA_TSTRING:\
+            lua_pushnumber(l, x->number op lua_tonumber(l, 2));\
+            break;\
+        case LUA_TNUMBER:\
+            lua_pushnumber(l, x->number op lua_tonumber(l, 2));\
+            break;\
+        case LUA_TUSERDATA:\
+            y = check_number_long_t(l, 2);\
+                                          \
+            z = (number_long_t *)lua_newuserdata(l, sizeof(number_long_t));\
+            z->number = x->number op y->number;\
+            luaL_getmetatable(l, "numberlong_meta");\
+            lua_setmetatable(l, -2);\
+            break;\
+        default:\
+            luaL_error(l, "expected string, number, number_long");\
+            return 0;\
+        }\
+        return 1;\
+    }
 
-    number_long_t *z = (number_long_t *)lua_newuserdata(l, sizeof(number_long_t));
-    z->number = x->number - y->number;
-    luaL_getmetatable(l, "numberlong_meta");
-    lua_setmetatable(l, -2);
-    return 1;
+make_number_long_numerical_operator_func(add, +)
+make_number_long_numerical_operator_func(sub, -)
+make_number_long_numerical_operator_func(mul, *)
+make_number_long_numerical_operator_func(div, /)
+// make_number_long_numerical_operator_func(mod, %)
+
+#define make_number_long_compare_operator_function(name,op) \
+    int lua_number_long_##name(lua_State *l) {\
+    number_long_t *x = check_number_long_t(l, 1);\
+    number_long_t *y = check_number_long_t(l, 2);\
+    lua_pushboolean(l, x->number op y->number);\
+    return 1;\
 }
 
-int lua_number_long_equal(lua_State *l) {
-    number_long_t *x = (number_long_t *)lua_touserdata(l, 1);
-    number_long_t *y = (number_long_t *)lua_touserdata(l, 2);
-    lua_pushboolean(l, x->number == y->number);
-    return 1;
-}
-
-int lua_number_long_great_than(lua_State *l) {
-    number_long_t *x = (number_long_t *)lua_touserdata(l, 1);
-    number_long_t *y = (number_long_t *)lua_touserdata(l, 2);
-    lua_pushboolean(l, x->number > y->number);
-    return 1;
-}
-
-int lua_number_long_great_than_or_equal(lua_State *l) {
-    number_long_t *x = (number_long_t *)lua_touserdata(l, 1);
-    number_long_t *y = (number_long_t *)lua_touserdata(l, 2);
-    lua_pushboolean(l, x->number >= y->number);
-    return 1;
-}
-
-int lua_number_long_less_than(lua_State *l) {
-    number_long_t *x = (number_long_t *)lua_touserdata(l, 1);
-    number_long_t *y = (number_long_t *)lua_touserdata(l, 2);
-    lua_pushboolean(l, x->number < y->number);
-    return 1;
-}
-
-int lua_number_long_less_than_or_equal(lua_State *l) {
-    number_long_t *x = (number_long_t *)lua_touserdata(l, 1);
-    number_long_t *y = (number_long_t *)lua_touserdata(l, 2);
-    lua_pushboolean(l, x->number <= y->number);
-    return 1;
-}
+make_number_long_compare_operator_function(equal, ==)
+make_number_long_compare_operator_function(greater_than, >)
+make_number_long_compare_operator_function(greater_than_or_equal, >=)
+make_number_long_compare_operator_function(less_than, <)
+make_number_long_compare_operator_function(less_than_or_equal, <=)
 
 /* Return cjson module table */
 static int lua_cjson_new(lua_State *l)
@@ -1585,13 +1586,16 @@ static int lua_cjson_new(lua_State *l)
 
     luaL_Reg numberlonglib_m[] = {
         {"__tostring", lua_number_long_tostring},
+        {"__tonumber", lua_number_long_tonumber},
         {"__add", lua_number_long_add},
         {"__sub", lua_number_long_sub},
+        {"__mul", lua_number_long_mul},
+        {"__div", lua_number_long_div},
         {"__eq", lua_number_long_equal},
-        {"__gt", lua_number_long_great_than},
-        {"__gte", lua_number_long_great_than_or_equal},
+        {"__gt", lua_number_long_greater_than},
+        {"__ge", lua_number_long_greater_than_or_equal},
         {"__lt", lua_number_long_less_than},
-        {"__lte", lua_number_long_less_than_or_equal},
+        {"__le", lua_number_long_less_than_or_equal},
         {NULL, NULL}
     };
 
