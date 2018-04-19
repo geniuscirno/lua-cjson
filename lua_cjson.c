@@ -1519,18 +1519,29 @@ int lua_number_long_tonumber(lua_State *l) {
 
 #define make_number_long_numerical_operator_func(name, op)    \
     int lua_number_long_##name(lua_State *l) {\
-        number_long_t *x = check_number_long_t(l, 1);\
+        int number_long_lindex;\
+        int other_lindex;\
+        number_long_t *x;\
         number_long_t *y;\
         number_long_t *z;\
-        switch (lua_type(l, 2)) {\
+        if (lua_type(l, 1)  == LUA_TUSERDATA){\
+            number_long_lindex = 1;\
+            other_lindex= 2;\
+        }else{\
+            number_long_lindex = 2;\
+            other_lindex = 1;\
+        }\
+        \
+        x = check_number_long_t(l, number_long_lindex);\
+        switch (lua_type(l, other_lindex)) {\
         case LUA_TSTRING:\
-            lua_pushnumber(l, x->number op lua_tonumber(l, 2));\
+            lua_pushnumber(l, x->number op lua_tonumber(l, other_lindex));\
             break;\
         case LUA_TNUMBER:\
-            lua_pushnumber(l, x->number op lua_tonumber(l, 2));\
+            lua_pushnumber(l, x->number op lua_tonumber(l, other_lindex));\
             break;\
         case LUA_TUSERDATA:\
-            y = check_number_long_t(l, 2);\
+            y = check_number_long_t(l, other_lindex);\
                                           \
             z = (number_long_t *)lua_newuserdata(l, sizeof(number_long_t));\
             z->number = x->number op y->number;\
@@ -1552,24 +1563,35 @@ make_number_long_numerical_operator_func(div, /)
 
 #define make_number_long_compare_operator_function(name,op) \
     int lua_number_long_##name(lua_State *l) {\
-    number_long_t *x = check_number_long_t(l, 1);\
-    number_long_t *y;\
-    switch (lua_type(l, 2)) {\
-    case LUA_TSTRING:\
-        lua_pushboolean(l, x->number op lua_tonumber(l, 2));\
-        break;\
-    case LUA_TNUMBER:\
-        lua_pushboolean(l, x->number op lua_tonumber(l, 2));\
-        break;\
-    case LUA_TUSERDATA:\
-        y = check_number_long_t(l, 2);\
-        lua_pushboolean(l, x->number op y->number);\
-        break;\
-    default:\
-        luaL_error(l, "expected string, number, number_long");\
-        return 0;\
-    }\
-    return 1;\
+        int number_long_lindex;\
+        int other_lindex;\
+        number_long_t *x;\
+        number_long_t *y;\
+        if (lua_type(l, 1)  == LUA_TUSERDATA){\
+            number_long_lindex = 1;\
+            other_lindex= 2;\
+        }else{\
+            number_long_lindex = 2;\
+            other_lindex = 1;\
+        }\
+        \
+        x = check_number_long_t(l, number_long_lindex);\
+        switch (lua_type(l, other_lindex)) {\
+        case LUA_TSTRING:\
+            lua_pushboolean(l, x->number op lua_tonumber(l, other_lindex));\
+            break;\
+        case LUA_TNUMBER:\
+            lua_pushboolean(l, x->number op lua_tonumber(l, other_lindex));\
+            break;\
+        case LUA_TUSERDATA:\
+            y = check_number_long_t(l, other_lindex);\
+            lua_pushboolean(l, x->number op y->number);\
+            break;\
+        default:\
+            luaL_error(l, "expected string, number, number_long");\
+            return 0;\
+        }\
+        return 1;\
 }
 
 make_number_long_compare_operator_function(equal, ==)

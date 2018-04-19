@@ -16,6 +16,7 @@ print (a+"12")
 print (a=="10")
 print (a==10)
 print (b=="11")
+print (1+a)
 
 local t = getmetatable(a)
 print (t.__type)
